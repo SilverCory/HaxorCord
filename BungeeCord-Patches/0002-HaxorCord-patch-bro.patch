@@ -107,7 +107,7 @@ index 5798477..0000000
 -	public void onEnable() {
 -
 -		try {
--			if(!UserConnection.class.getField("fakeName").getType().equals(String.class))
+-			if(!UserConnection.class.getDeclaredField("fakeName").getType().equals(String.class))
 -				throw new RuntimeException("This version of BungeeCord is not patched to be PR() haxor.");
 -		} catch (Exception e) {
 -			getLogger().severe(e.getMessage());

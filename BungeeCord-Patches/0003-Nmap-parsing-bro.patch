@@ -1,0 +1,466 @@
+From bcfa190f587b051caffcd35f0d7b06ec7816e369 Mon Sep 17 00:00:00 2001
+From: Cory Redmond <ace@ac3-servers.eu>
+Date: Mon, 11 Apr 2016 01:12:56 +0100
+Subject: [PATCH] Nmap parsing bro
+
+---
+ .../main/java/co/ryred/haxorcord/HaxorPlugin.java  |  18 ++
+ .../co/ryred/haxorcord/commands/NmapCommand.java   | 315 +++++++++++++++++++++
+ .../haxorcord/gson/ServerInfoTypeAdapter.java      |  73 +++++
+ 3 files changed, 406 insertions(+)
+ create mode 100644 proxy/src/main/java/co/ryred/haxorcord/commands/NmapCommand.java
+ create mode 100644 proxy/src/main/java/co/ryred/haxorcord/gson/ServerInfoTypeAdapter.java
+
+diff --git a/proxy/src/main/java/co/ryred/haxorcord/HaxorPlugin.java b/proxy/src/main/java/co/ryred/haxorcord/HaxorPlugin.java
+index 8a584bd..cd2de5b 100644
+--- a/proxy/src/main/java/co/ryred/haxorcord/HaxorPlugin.java
++++ b/proxy/src/main/java/co/ryred/haxorcord/HaxorPlugin.java
+@@ -35,6 +35,7 @@
+ 
+ package co.ryred.haxorcord;
+ 
++import co.ryred.haxorcord.commands.NmapCommand;
+ import co.ryred.haxorcord.commands.SlashCommand;
+ import co.ryred.haxorcord.commands.RandomCommand;
+ import co.ryred.haxorcord.conf.HaxorConf;
+@@ -42,6 +43,7 @@ import co.ryred.haxorcord.conf.ResConf;
+ import co.ryred.haxorcord.commands.AtCommand;
+ import co.ryred.haxorcord.listeners.ChatHandler;
+ import co.ryred.haxorcord.listeners.MainListener;
++import lombok.Getter;
+ import net.md_5.bungee.BungeeCord;
+ import net.md_5.bungee.UserConnection;
+ import net.md_5.bungee.api.plugin.Listener;
+@@ -61,6 +63,21 @@ public class HaxorPlugin extends Plugin implements Listener {
+ 
+ 	private HaxorConf conf;
+ 	private ResConf resConf;
++	@Getter
++	private File nmapLogsFolder = new File( "nmap_logs" );
++	@Getter
++	private File nmapServersFolder = new File( "nmap_servers" );
++
++	@Override
++	public void onLoad() {
++
++		if( nmapLogsFolder.exists() || !nmapLogsFolder.isDirectory() )
++			nmapLogsFolder.mkdirs();
++
++		if( nmapServersFolder.exists() || !nmapServersFolder.isDirectory() )
++			nmapServersFolder.mkdirs();
++
++	}
+ 
+ 	@Override
+ 	public void onEnable() {
+@@ -81,6 +98,7 @@ public class HaxorPlugin extends Plugin implements Listener {
+ 		getProxy().getPluginManager().registerCommand(this, new SlashCommand(this));
+ 		getProxy().getPluginManager().registerCommand(this, new RandomCommand(this));
+ 		getProxy().getPluginManager().registerCommand(this, new AtCommand(this));
++		getProxy().getPluginManager().registerCommand(this, new NmapCommand(this));
+ 
+ 		getProxy().getPluginManager().registerListener(this, new MainListener(this));
+ 		getProxy().getPluginManager().registerListener(this, new ChatHandler(this));
+diff --git a/proxy/src/main/java/co/ryred/haxorcord/commands/NmapCommand.java b/proxy/src/main/java/co/ryred/haxorcord/commands/NmapCommand.java
+new file mode 100644
+index 0000000..ed7de56
+--- /dev/null
++++ b/proxy/src/main/java/co/ryred/haxorcord/commands/NmapCommand.java
+@@ -0,0 +1,315 @@
++/*
++ * http://ryred.co/
++ * ace[at]ac3-servers.eu
++ *
++ * =================================================================
++ *
++ * Copyright (c) 2016, Cory Redmond
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ *
++ *  Redistributions of source code must retain the above copyright notice, this
++ *   list of conditions and the following disclaimer.
++ *
++ *  Redistributions in binary form must reproduce the above copyright notice,
++ *   this list of conditions and the following disclaimer in the documentation
++ *   and/or other materials provided with the distribution.
++ *
++ *  Neither the name of BungeeCord nor the names of its
++ *   contributors may be used to endorse or promote products derived from
++ *   this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
++ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
++ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
++ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
++ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++package co.ryred.haxorcord.commands;
++
++import co.ryred.haxorcord.HaxorPlugin;
++import co.ryred.haxorcord.gson.ServerInfoTypeAdapter;
++import com.google.common.base.Joiner;
++import com.google.gson.Gson;
++import com.google.gson.GsonBuilder;
++import com.google.gson.reflect.TypeToken;
++import net.md_5.bungee.BungeeServerInfo;
++import net.md_5.bungee.api.ChatColor;
++import net.md_5.bungee.api.CommandSender;
++import net.md_5.bungee.api.chat.ClickEvent;
++import net.md_5.bungee.api.chat.TextComponent;
++import net.md_5.bungee.api.config.ServerInfo;
++import net.md_5.bungee.api.connection.ProxiedPlayer;
++import net.md_5.bungee.api.plugin.Command;
++
++import java.io.*;
++import java.lang.reflect.Type;
++import java.net.InetSocketAddress;
++import java.util.*;
++import java.util.concurrent.ConcurrentHashMap;
++
++/**
++ * Created by Cory Redmond on 10/04/2016.
++ *
++ * @author Cory Redmond <ace@ac3-servers.eu>
++ */
++@SuppressWarnings( "deprecation" )
++public class NmapCommand extends Command {
++
++	private final HaxorPlugin plugin;
++	private final ConcurrentHashMap<String, HashSet<ServerInfo>> servers = new ConcurrentHashMap<>();
++
++	private static Gson GSON = new GsonBuilder().setPrettyPrinting().registerTypeAdapter( ServerInfo.class, new ServerInfoTypeAdapter() ).registerTypeAdapter( BungeeServerInfo.class, new ServerInfoTypeAdapter() ).create();
++
++	public NmapCommand( HaxorPlugin plugin ) {
++		super( "nmap" );
++		this.plugin = plugin;
++	}
++
++	@Override
++	public void execute( final CommandSender sender, final String[] args ) {
++
++		if( args.length < 1 ) {
++			sendUsage( sender );
++		} else if( args[0].equalsIgnoreCase( "load" ) ) {
++
++			if( args.length != 2 ) {
++				sender.sendMessage( c( "&cIncorrect usage!" ) );
++				sender.sendMessage( c( "&c /nmap load [name]" ) );
++				return;
++			}
++
++			final File saveFile = new File( plugin.getNmapServersFolder(), args[1].toLowerCase() + ".json" );
++
++			if( !saveFile.exists() ) {
++				sender.sendMessage( c( "&cThat file isn't valid or doesn't exist?" ) );
++				return;
++			}
++
++			plugin.getProxy().getScheduler().runAsync( plugin, new Runnable() {
++				@Override
++				public void run() {
++					try {
++						HashSet<ServerInfo> serverInfos = new HashSet<>( deserializeServers( new Scanner( saveFile ).useDelimiter( "\\A" ).next() ) );
++						servers.put( args[1].toLowerCase(), serverInfos );
++						sender.sendMessage( c( "&a" + args[1].toLowerCase() + " was loaded/reloaded." ) );
++					} catch ( Exception ex ) {
++						sender.sendMessage( c( "&cAn error occurred!" ) );
++						sender.sendMessage( c( "&c   " + ex.getMessage() ) );
++						ex.printStackTrace();
++					}
++				}
++			} );
++
++
++		} else if( args[0].equalsIgnoreCase( "unload" ) ) {
++			// /nmap unload [name]
++
++			if( args.length != 2 ) {
++				sender.sendMessage( c( "&cIncorrect usage!" ) );
++				sender.sendMessage( c( "&c /nmap unload [name]" ) );
++				return;
++			}
++
++			servers.remove( args[1].toLowerCase() );
++			sender.sendMessage( c( "&a" + args[1].toLowerCase() + " was unloaded, or wasn't loaded in the first place.." ) );
++
++		} else if( args[0].equalsIgnoreCase( "import" ) ) {
++			// /nmap import [name] [filename ... ]
++
++			if( args.length < 3 ) {
++				sender.sendMessage( c( "&cIncorrect usage!" ) );
++				sender.sendMessage( c( "&c /nmap import [name] [filename]" ) );
++				return;
++			}
++
++			final File logFile = new File( plugin.getNmapLogsFolder(), Joiner.on(' ').join( Arrays.copyOfRange( args, 2, args.length ) ) );
++			if( !logFile.exists() || !logFile.isFile() ) {
++				sender.sendMessage( c( "&cThat file is invalid or doesn't exist" ) );
++				return;
++			}
++
++			plugin.getProxy().getScheduler().runAsync( plugin, new Runnable() {
++				@Override
++				public void run() {
++					try ( BufferedReader logReader = new BufferedReader( new InputStreamReader( new FileInputStream( logFile ) ) ) ) {
++
++						Set<ServerInfo> serverInfos = new HashSet<>();
++
++						File saveFile = new File( plugin.getNmapServersFolder(), args[1].toLowerCase() + ".json" );
++						if ( saveFile.exists() ) {
++							serverInfos = new HashSet<>( deserializeServers( new Scanner( saveFile ).useDelimiter( "\\A" ).next() ) );
++						}
++
++						String line;
++						while ( (line = logReader.readLine()) != null ) {
++							line = line.trim();
++
++							if ( line.toLowerCase().startsWith( "completed syn stealth scan at" ) ) {
++								break;
++							} else if ( line.toLowerCase().startsWith( "discovered open port " ) ) {
++
++								String[] serverInfo = line.toLowerCase().replace( "discovered open port ", "" ).split( "/tcp on " );
++								if ( serverInfo.length == 2 ) {
++									try {
++										int port = Integer.parseInt( serverInfo[0] );
++										String address = serverInfo[1];
++										if ( port > 10000 && port < 65536 || System.getProperty( "UnsafePortScanning" ) != null ) {
++											serverInfos.add( new BungeeServerInfo( address + ":" + port, new InetSocketAddress( address, port ), "", false ) );
++										}
++									} catch ( NumberFormatException ignored ) {
++									}
++								}
++
++							}
++						}
++
++						FileWriter fw = new FileWriter( saveFile );
++						fw.write( serialiseServers( serverInfos ) );
++						fw.flush();
++						fw.close();
++
++						sender.sendMessage( c( "&a" + args[1].toLowerCase() + " has been imported! Total: &e" + serverInfos.size() ) );
++
++					} catch ( Exception ex ) {
++						sender.sendMessage( c( "&cAn error occurred!" ) );
++						sender.sendMessage( c( "&c   " + ex.getMessage() ) );
++						ex.printStackTrace();
++					}
++				}
++
++			} );
++
++		} else if( args[0].equalsIgnoreCase( "list" ) ) {
++			// /nmap list [name] <page>
++
++			if( args.length != 2 && args.length != 3 ) {
++				sender.sendMessage( c( "&cIncorrect usage!" ) );
++				sender.sendMessage( c( "&c /nmap list [name] <page>" ) );
++				return;
++			}
++
++			final String name = args[1].toLowerCase();
++
++			if( !servers.containsKey( name ) ) {
++				sender.sendMessage( c( "&c" + name + " isn't loaded!? Try &e/nmap load [name]" ) );
++				return;
++			}
++
++			int page = 1;
++			if( args.length == 3 ) {
++				try {
++					page = Integer.parseInt( args[2] );
++					if( page < 1 ) throw new IllegalArgumentException();
++				} catch ( IllegalArgumentException ex ) {
++					sender.sendMessage( c( "&cThe page number was invalid!" ) );
++					return;
++				}
++			}
++
++			HashSet<ServerInfo> serverInfoHashSet = servers.get( name );
++			ServerInfo[] serverInfos = serverInfoHashSet.toArray( new ServerInfo[serverInfoHashSet.size()] );
++
++			int startEntry = ( page - 1 ) * 5;
++			int endEntry = startEntry + 4;
++
++			ArrayList<TextComponent> messages = new ArrayList<>();
++			messages.add( new TextComponent( c( "&d" + name + " page " + page +  ": " ) ) );
++			for( int i = startEntry; i <= endEntry; i++ ) {
++
++				if( i >= serverInfos.length ) break;
++
++				InetSocketAddress addr = serverInfos[i].getAddress();
++				TextComponent tc = new TextComponent( c( "&9 " + (i + 1) + " - " + addr.getHostString() + ":" + addr.getPort() ) );
++				tc.setClickEvent( new ClickEvent( ClickEvent.Action.RUN_COMMAND, "/nmap server " + name + " " + (i + 1) ) );
++				messages.add( tc );
++
++			}
++
++			for( TextComponent message : messages )
++				sender.sendMessage( message );
++
++		} else if( args[0].equalsIgnoreCase( "server" ) ) {
++			// /nmap server [name] [id]
++
++			if( args.length != 3 ) {
++				sender.sendMessage( c( "&cIncorrect usage!" ) );
++				sender.sendMessage( c( "&c /nmap server [name] [id]" ) );
++				return;
++			}
++
++			final String name = args[1].toLowerCase();
++
++			final int serverNumber;
++			try {
++				serverNumber = Integer.parseInt( args[2] ) - 1;
++				if ( serverNumber < 0 ) throw new IllegalArgumentException();
++			} catch ( IllegalArgumentException ex ) {
++				sender.sendMessage( c( "&cThe server id was invalid!" ) );
++				return;
++			}
++
++			if( !servers.containsKey( name ) ) {
++				sender.sendMessage( c( "&c" + name + " isn't loaded!? Try &e/nmap load [name]" ) );
++				return;
++			}
++
++			if( !(sender instanceof ProxiedPlayer) ) {
++				sender.sendMessage( c( "You need to be a player!" ) );
++				return;
++			}
++
++			ProxiedPlayer player = ((ProxiedPlayer) sender);
++
++			HashSet<ServerInfo> serverInfoHashSet = servers.get( name );
++			ServerInfo[] serverInfos = serverInfoHashSet.toArray( new ServerInfo[serverInfoHashSet.size()] );
++
++			if( serverNumber >= serverInfos.length ) {
++				sender.sendMessage( c( "&cThe server id was invalid!" ) );
++				return;
++			}
++
++			player.connect( serverInfos[ serverNumber ] );
++
++		}
++
++	}
++
++	private void sendUsage( CommandSender sender ) {
++
++		sender.sendMessage( c( "&9==== NMAP Parsing =====" ) );
++		sender.sendMessage( c( "&d/nmap import [name] [filename]" ) );
++		sender.sendMessage( c( "&e   Imports the nmap log of [filename] to [name]." ) );
++		sender.sendMessage( c( "&d /nmap load [name]" ) );
++		sender.sendMessage( c( "&e   Loads the parsed ports of [name]." ) );
++		sender.sendMessage( c( "&d /nmap unload [name]" ) );
++		sender.sendMessage( c( "&e   Unloads the parsed ports of [name]." ) );
++		sender.sendMessage( c( "&d /nmap list [name] <page>" ) );
++		sender.sendMessage( c( "&e   Lists the servers of [name]." ) );
++		sender.sendMessage( c( "&d /nmap server [name] [id]" ) );
++		sender.sendMessage( c( "&e   Sends you to the server with [id] belonging to [id]." ) );
++
++	}
++
++	private String c(String s) {
++		return ChatColor.translateAlternateColorCodes( '&', s );
++	}
++
++	public static String serialiseServers( Collection<ServerInfo> servers ) {
++		return GSON.toJson( servers );
++	}
++
++	public static Collection<ServerInfo> deserializeServers( String serversJson ) {
++		Type serversType = new TypeToken<Collection<ServerInfo>>(){}.getType();
++		return GSON.fromJson( serversJson, serversType );
++	}
++
++}
+diff --git a/proxy/src/main/java/co/ryred/haxorcord/gson/ServerInfoTypeAdapter.java b/proxy/src/main/java/co/ryred/haxorcord/gson/ServerInfoTypeAdapter.java
+new file mode 100644
+index 0000000..0c95f31
+--- /dev/null
++++ b/proxy/src/main/java/co/ryred/haxorcord/gson/ServerInfoTypeAdapter.java
+@@ -0,0 +1,73 @@
++/*
++ * http://ryred.co/
++ * ace[at]ac3-servers.eu
++ *
++ * =================================================================
++ *
++ * Copyright (c) 2016, Cory Redmond
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ *
++ *  Redistributions of source code must retain the above copyright notice, this
++ *   list of conditions and the following disclaimer.
++ *
++ *  Redistributions in binary form must reproduce the above copyright notice,
++ *   this list of conditions and the following disclaimer in the documentation
++ *   and/or other materials provided with the distribution.
++ *
++ *  Neither the name of BungeeCord nor the names of its
++ *   contributors may be used to endorse or promote products derived from
++ *   this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
++ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
++ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
++ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
++ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++package co.ryred.haxorcord.gson;
++
++import com.google.gson.*;
++import net.md_5.bungee.BungeeServerInfo;
++import net.md_5.bungee.api.config.ServerInfo;
++
++import java.lang.reflect.Type;
++import java.net.InetSocketAddress;
++
++/**
++ * Created by Cory Redmond on 10/04/2016.
++ *
++ * @author Cory Redmond <ace@ac3-servers.eu>
++ */
++public class ServerInfoTypeAdapter implements JsonSerializer<ServerInfo>, JsonDeserializer<ServerInfo> {
++
++	@Override
++	public ServerInfo deserialize( JsonElement jsonElement, Type type, JsonDeserializationContext jsonDeserializationContext ) throws JsonParseException {
++
++		JsonObject json = ((JsonObject) jsonElement);
++		String address = json.get( "addr" ).getAsString();
++		int port = json.get( "port" ).getAsInt();
++
++		return new BungeeServerInfo( address + ":" + port, new InetSocketAddress( address, port ), "", false );
++
++	}
++
++	@Override
++	public JsonElement serialize( ServerInfo serverInfo, Type type, JsonSerializationContext jsonSerializationContext ) {
++
++		JsonObject json = new JsonObject();
++		json.addProperty( "addr", serverInfo.getAddress().getHostString() );
++		json.addProperty( "port", serverInfo.getAddress().getPort() );
++
++		return json;
++	}
++
++}
+-- 
+2.6.4.windows.1
+

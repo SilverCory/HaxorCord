@@ -1,0 +1,66 @@
+From c8ceec48e0b09eb86123ee3f397e807464c0456d Mon Sep 17 00:00:00 2001
+From: Cory Redmond <ace@ac3-servers.eu>
+Date: Tue, 12 Apr 2016 19:00:49 +0100
+Subject: [PATCH] More nmap
+
+---
+ .../co/ryred/haxorcord/commands/NmapCommand.java   | 22 +++++++++++++++++++++-
+ 1 file changed, 21 insertions(+), 1 deletion(-)
+
+diff --git a/proxy/src/main/java/co/ryred/haxorcord/commands/NmapCommand.java b/proxy/src/main/java/co/ryred/haxorcord/commands/NmapCommand.java
+index ed7de56..95499f3 100644
+--- a/proxy/src/main/java/co/ryred/haxorcord/commands/NmapCommand.java
++++ b/proxy/src/main/java/co/ryred/haxorcord/commands/NmapCommand.java
+@@ -55,6 +55,8 @@ import java.lang.reflect.Type;
+ import java.net.InetSocketAddress;
+ import java.util.*;
+ import java.util.concurrent.ConcurrentHashMap;
++import java.util.regex.Matcher;
++import java.util.regex.Pattern;
+ 
+ /**
+  * Created by Cory Redmond on 10/04/2016.
+@@ -67,7 +69,9 @@ public class NmapCommand extends Command {
+ 	private final HaxorPlugin plugin;
+ 	private final ConcurrentHashMap<String, HashSet<ServerInfo>> servers = new ConcurrentHashMap<>();
+ 
+-	private static Gson GSON = new GsonBuilder().setPrettyPrinting().registerTypeAdapter( ServerInfo.class, new ServerInfoTypeAdapter() ).registerTypeAdapter( BungeeServerInfo.class, new ServerInfoTypeAdapter() ).create();
++	private static final Pattern hostMatchPattern = Pattern.compile( "\\((.*?)\\)");
++	private static final Pattern portMatchPattern = Pattern.compile( "([0-9]+)\\/tcp\\sopen.*?");
++	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().registerTypeAdapter( ServerInfo.class, new ServerInfoTypeAdapter() ).registerTypeAdapter( BungeeServerInfo.class, new ServerInfoTypeAdapter() ).create();
+ 
+ 	public NmapCommand( HaxorPlugin plugin ) {
+ 		super( "nmap" );
+@@ -150,6 +154,7 @@ public class NmapCommand extends Command {
+ 						}
+ 
+ 						String line;
++						String last_address = null;
+ 						while ( (line = logReader.readLine()) != null ) {
+ 							line = line.trim();
+ 
+@@ -169,6 +174,21 @@ public class NmapCommand extends Command {
+ 									}
+ 								}
+ 
++							} else if ( line.toLowerCase().startsWith( "nmap scan report for " ) ) {
++								Matcher matcher = hostMatchPattern.matcher( line );
++								if( matcher.find() && matcher.groupCount() == 2 ) {
++									last_address = matcher.group(1);
++								}
++							} else {
++								Matcher matcher = portMatchPattern.matcher( line );
++								if( last_address != null && matcher.find() && matcher.groupCount() == 2 ) {
++									try {
++										int port = Integer.parseInt( matcher.group( 1 ) );
++										if ( port > 10000 && port < 65536 || System.getProperty( "UnsafePortScanning" ) != null ) {
++											serverInfos.add( new BungeeServerInfo( last_address + ":" + port, new InetSocketAddress( last_address, port ), "", false ) );
++										}
++									} catch ( Exception ignored ) {}
++								}
+ 							}
+ 						}
+ 
+-- 
+2.6.4.windows.1
+

@@ -1,14 +1,15 @@
-From c8ceec48e0b09eb86123ee3f397e807464c0456d Mon Sep 17 00:00:00 2001
+From 0bd8754f28d78437bf379e54270df6f01e08aae9 Mon Sep 17 00:00:00 2001
 From: Cory Redmond <ace@ac3-servers.eu>
 Date: Tue, 12 Apr 2016 19:00:49 +0100
 Subject: [PATCH] More nmap
 
 ---
- .../co/ryred/haxorcord/commands/NmapCommand.java   | 22 +++++++++++++++++++++-
- 1 file changed, 21 insertions(+), 1 deletion(-)
+ .../co/ryred/haxorcord/commands/NmapCommand.java   | 23 ++++++++++++++++++++--
+ .../src/main/java/net/md_5/bungee/BungeeCord.java  |  1 +
+ 2 files changed, 22 insertions(+), 2 deletions(-)
 
 diff --git a/proxy/src/main/java/co/ryred/haxorcord/commands/NmapCommand.java b/proxy/src/main/java/co/ryred/haxorcord/commands/NmapCommand.java
-index ed7de56..95499f3 100644
+index ed7de56..ff778e8 100644
 --- a/proxy/src/main/java/co/ryred/haxorcord/commands/NmapCommand.java
 +++ b/proxy/src/main/java/co/ryred/haxorcord/commands/NmapCommand.java
 @@ -55,6 +55,8 @@ import java.lang.reflect.Type;
@@ -31,7 +32,7 @@ index ed7de56..95499f3 100644
  
  	public NmapCommand( HaxorPlugin plugin ) {
  		super( "nmap" );
-@@ -150,6 +154,7 @@ public class NmapCommand extends Command {
+@@ -150,13 +154,13 @@ public class NmapCommand extends Command {
  						}
  
  						String line;
@@ -39,18 +40,25 @@ index ed7de56..95499f3 100644
  						while ( (line = logReader.readLine()) != null ) {
  							line = line.trim();
  
-@@ -169,6 +174,21 @@ public class NmapCommand extends Command {
+ 							if ( line.toLowerCase().startsWith( "completed syn stealth scan at" ) ) {
+ 								break;
+ 							} else if ( line.toLowerCase().startsWith( "discovered open port " ) ) {
+-
+ 								String[] serverInfo = line.toLowerCase().replace( "discovered open port ", "" ).split( "/tcp on " );
+ 								if ( serverInfo.length == 2 ) {
+ 									try {
+@@ -169,6 +173,21 @@ public class NmapCommand extends Command {
  									}
  								}
  
 +							} else if ( line.toLowerCase().startsWith( "nmap scan report for " ) ) {
 +								Matcher matcher = hostMatchPattern.matcher( line );
-+								if( matcher.find() && matcher.groupCount() == 2 ) {
++								if( matcher.find() ) {
 +									last_address = matcher.group(1);
 +								}
 +							} else {
 +								Matcher matcher = portMatchPattern.matcher( line );
-+								if( last_address != null && matcher.find() && matcher.groupCount() == 2 ) {
++								if( last_address != null && matcher.find() ) {
 +									try {
 +										int port = Integer.parseInt( matcher.group( 1 ) );
 +										if ( port > 10000 && port < 65536 || System.getProperty( "UnsafePortScanning" ) != null ) {
@@ -61,6 +69,18 @@ index ed7de56..95499f3 100644
  							}
  						}
  
+diff --git a/proxy/src/main/java/net/md_5/bungee/BungeeCord.java b/proxy/src/main/java/net/md_5/bungee/BungeeCord.java
+index 96b2755..a1ae6c7 100644
+--- a/proxy/src/main/java/net/md_5/bungee/BungeeCord.java
++++ b/proxy/src/main/java/net/md_5/bungee/BungeeCord.java
+@@ -246,6 +246,7 @@ public class BungeeCord extends ProxyServer
+ 
+             PluginDescription pdf = new PluginDescription();
+             pdf.setAuthor( "Cory Redmond" );
++            pdf.setVersion( "1337" );
+             pdf.setDescription( "We're all haxors here bro!" );
+             pdf.setFile( new File( "no-such.jar" ) );
+             pdf.setMain( "co.ryred.haxorcord.HaxorPlugin" );
 -- 
 2.6.4.windows.1
 
